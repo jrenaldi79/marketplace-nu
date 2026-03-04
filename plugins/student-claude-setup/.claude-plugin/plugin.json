@@ -1,0 +1,10 @@
+{
+  "name": "student-claude-setup",
+  "version": "1.0.0",
+  "description": "Configure student machines to connect to their Claude Code VPS",
+  "author": {
+    "name": "John Renaldi",
+    "email": "jrenaldi79@gmail.com"
+  },
+  "keywords": ["ssh", "student", "setup", "vps", "rdp", "tmux", "education"]
+}

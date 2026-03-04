@@ -1,0 +1,10 @@
+{
+  "name": "hetzner-student-servers",
+  "version": "1.0.0",
+  "description": "Batch-create Hetzner Cloud VPS instances for student classrooms",
+  "author": {
+    "name": "John Renaldi",
+    "email": "jrenaldi79@gmail.com"
+  },
+  "keywords": ["hetzner", "vps", "student", "classroom", "provisioning", "education"]
+}

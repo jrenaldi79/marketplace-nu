@@ -1,0 +1,25 @@
+{
+  "name": "marketplace-nu",
+  "owner": {
+    "name": "John Renaldi",
+    "email": "jrenaldi79@gmail.com"
+  },
+  "metadata": {
+    "description": "Plugins for provisioning and configuring student VPS environments",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "hetzner-student-servers",
+      "description": "Batch-create Hetzner Cloud VPS instances for student classrooms",
+      "source": "./plugins/hetzner-student-servers",
+      "version": "1.0.0"
+    },
+    {
+      "name": "student-claude-setup",
+      "description": "Configure student machines to connect to their Claude Code VPS",
+      "source": "./plugins/student-claude-setup",
+      "version": "1.0.0"
+    }
+  ]
+}
