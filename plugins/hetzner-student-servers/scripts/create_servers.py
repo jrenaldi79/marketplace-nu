@@ -15,7 +15,12 @@ apt-get update
 apt-get install -y git python3 python3-pip curl wget tmux
 
 # Install Remote Desktop Environment (KDE Plasma), XRDP, and Samba
-apt-get install -y kde-plasma-desktop xrdp firefox dbus-x11 samba fuse3
+apt-get install -y kde-plasma-desktop xrdp dbus-x11 samba fuse3
+
+# Install Google Chrome (Firefox snap doesn't work with XRDP)
+wget -q -O /tmp/chrome.deb 'https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb'
+apt-get install -y /tmp/chrome.deb
+rm /tmp/chrome.deb
 
 # Install rclone
 curl https://rclone.org/install.sh | bash
@@ -73,6 +78,16 @@ chmod +x /etc/xrdp/startwm.sh
 # Add xrdp user to ssl-cert group
 adduser xrdp ssl-cert
 
+# Configure XRDP for auto-login (skip login dialog entirely)
+# - autorun=Xorg: auto-select the Xorg session type
+# - hidelogwindow=true: hide the XRDP login dialog
+# - Hardcode student credentials in [Xorg] section
+# - Remove all other session types (Xvnc, vnc-any, neutrinordp-any)
+sed -i 's/^autorun=$/autorun=Xorg/' /etc/xrdp/xrdp.ini
+sed -i 's/^#hidelogwindow=true/hidelogwindow=true/' /etc/xrdp/xrdp.ini
+sed -i '/^\[Xorg\]/,/^\[/ { s/^username=ask/username=student/; s/^password=ask/password={password}/ }' /etc/xrdp/xrdp.ini
+sed -i '/^\[Xvnc\]/,$d' /etc/xrdp/xrdp.ini
+
 # Start and enable XRDP
 systemctl enable xrdp
 systemctl restart xrdp
@@ -88,6 +103,19 @@ chown -R student:student /home/student/.ssh
 chmod 700 /home/student/.ssh
 chmod 600 /home/student/.ssh/authorized_keys
 chown -R student:student /home/student/projects
+
+# Ensure the entire student home directory is owned by the student user
+# (KDE Plasma creates config files as root during cloud-init, causing "not writable" errors on RDP login)
+chown -R student:student /home/student
+
+# Allow student to manage network without PolicyKit prompts on RDP login
+cat << 'PKEOF' > /etc/polkit-1/rules.d/50-allow-network-manager.rules
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager") === 0 && subject.user === "student") {
+        return polkit.Result.YES;
+    }
+});
+PKEOF
 
 # Configure SMB Share
 cat << 'EOF' >> /etc/samba/smb.conf

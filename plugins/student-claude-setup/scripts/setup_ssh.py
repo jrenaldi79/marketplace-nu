@@ -5,7 +5,7 @@ import platform
 import subprocess
 
 SSH_TEMPLATE_MAC = """
-Host claude-box
+Host {host_alias}
     HostName {ip_address}
     User student
     IdentityFile {key_path}
@@ -15,7 +15,7 @@ Host claude-box
 """
 
 SSH_TEMPLATE_WIN = """
-Host claude-box
+Host {host_alias}
     HostName {ip_address}
     User student
     IdentityFile {key_path}
@@ -25,7 +25,14 @@ Host claude-box
 
 RDP_TEMPLATE = """full address:s:{ip_address}
 username:s:student
-prompt for credentials:i:1
+prompt for credentials:i:0
+connection type:i:7
+networkautodetect:i:1
+bandwidthautodetect:i:1
+disable wallpaper:i:1
+disable full window drag:i:1
+disable menu anims:i:1
+disable themes:i:0
 """
 
 def check_rdp_client():
@@ -44,13 +51,13 @@ def check_rdp_client():
     else:
         return True, f"Running on {os_name}. Please ensure you have an RDP client like Remmina installed."
 
-def test_ssh_connection():
+def test_ssh_connection(host_alias="claude-box"):
     print("\n--- Testing SSH Connection ---")
     print("Testing terminal access to the server...")
     try:
         # We use BatchMode=yes to fail fast instead of prompting for passwords if key auth fails
         result = subprocess.run(
-            ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes", "claude-box", "echo '✅ Connection Successful'"],
+            ["ssh", "-o", "StrictHostKeyChecking=accept-new", "-o", "BatchMode=yes", "-o", "RemoteCommand=none", host_alias, "echo '✅ Connection Successful'"],
             capture_output=True,
             text=True,
             timeout=15
@@ -83,7 +90,9 @@ def main():
     parser = argparse.ArgumentParser(description="Configure local SSH client to connect to your Claude VPS.")
     parser.add_argument("ip_address", help="The IP address of your server")
     parser.add_argument("key_path", help="The path to the private SSH key file you downloaded")
+    parser.add_argument("--host", default="claude-box", help="SSH host alias (default: claude-box)")
     args = parser.parse_args()
+    host_alias = args.host
 
     # Expand paths
     source_key_path = os.path.expanduser(args.key_path)
@@ -97,29 +106,30 @@ def main():
     os.chmod(ssh_dir, 0o700)
 
     # Copy the key to ~/.ssh and set correct permissions
-    dest_key_path = os.path.join(ssh_dir, "student_claude_key")
+    key_filename = f"student_claude_key_{host_alias}" if host_alias != "claude-box" else "student_claude_key"
+    dest_key_path = os.path.join(ssh_dir, key_filename)
     shutil.copy2(source_key_path, dest_key_path)
     os.chmod(dest_key_path, 0o600)
     print(f"✅ Copied SSH key to {dest_key_path} and set secure permissions.")
 
     # Update ~/.ssh/config
     config_path = os.path.join(ssh_dir, "config")
-    
+
     os_name = platform.system()
     if os_name == "Darwin":
-        config_entry = SSH_TEMPLATE_MAC.format(ip_address=args.ip_address, key_path=dest_key_path)
+        config_entry = SSH_TEMPLATE_MAC.format(host_alias=host_alias, ip_address=args.ip_address, key_path=dest_key_path)
     else:
-        config_entry = SSH_TEMPLATE_WIN.format(ip_address=args.ip_address, key_path=dest_key_path)
-    
+        config_entry = SSH_TEMPLATE_WIN.format(host_alias=host_alias, ip_address=args.ip_address, key_path=dest_key_path)
+
     if os.path.exists(config_path):
         with open(config_path, 'r') as f:
             content = f.read()
-        if "Host claude-box" not in content:
+        if f"Host {host_alias}" not in content:
             with open(config_path, 'a') as f:
                 f.write(config_entry)
             print(f"✅ Appended configuration to {config_path}.")
         else:
-            print("⚠️ A host named 'claude-box' already exists in your ~/.ssh/config file. Skipping SSH config update.")
+            print(f"⚠️ A host named '{host_alias}' already exists in your ~/.ssh/config file. Skipping SSH config update.")
     else:
         with open(config_path, 'a') as f:
             f.write(config_entry)
@@ -134,7 +144,8 @@ def main():
     if not os.path.exists(desktop_dir):
         desktop_dir = os.path.expanduser("~")
         
-    rdp_file_path = os.path.join(desktop_dir, "Claude-Box-Visual.rdp")
+    rdp_filename = f"{host_alias.title().replace('-', '-')}-Visual.rdp"
+    rdp_file_path = os.path.join(desktop_dir, rdp_filename)
     with open(rdp_file_path, "w") as f:
         f.write(RDP_TEMPLATE.format(ip_address=args.ip_address))
     
@@ -164,10 +175,11 @@ def main():
             subprocess.run(["scp", temp_conf, f"root@{args.ip_address}:/home/student/.config/rclone/rclone.conf"], capture_output=True)
             os.remove(temp_conf)
             
-            # Set permissions and setup service
+            # Set permissions, create dedicated folder in Google Drive, and setup service
             setup_cmds = [
                 "chown student:student /home/student/.config/rclone/rclone.conf",
-                "cat << 'EOF' > /etc/systemd/system/rclone-gdrive.service\n[Unit]\nDescription=RClone Mount Google Drive\nAfter=network-online.target\n\n[Service]\nType=simple\nUser=student\nExecStart=/usr/bin/rclone mount gdrive: /home/student/projects/GoogleDrive --vfs-cache-mode writes --vfs-cache-max-age 24h --vfs-cache-max-size 10G --allow-other --dir-cache-time 1m\nExecStop=/bin/fusermount -u /home/student/projects/GoogleDrive\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=default.target\nEOF",
+                "su - student -c 'rclone mkdir gdrive:VPS-Projects'",
+                "cat << 'EOF' > /etc/systemd/system/rclone-gdrive.service\n[Unit]\nDescription=RClone Mount Google Drive (VPS-Projects folder)\nAfter=network-online.target\n\n[Service]\nType=simple\nUser=student\nExecStart=/usr/bin/rclone mount gdrive:VPS-Projects /home/student/projects/GoogleDrive --vfs-cache-mode writes --vfs-cache-max-age 24h --vfs-cache-max-size 10G --allow-other --dir-cache-time 1m\nExecStop=/bin/fusermount -u /home/student/projects/GoogleDrive\nRestart=always\nRestartSec=10\n\n[Install]\nWantedBy=default.target\nEOF",
                 "systemctl daemon-reload",
                 "systemctl enable rclone-gdrive",
                 "systemctl start rclone-gdrive"
@@ -175,7 +187,7 @@ def main():
             
             full_setup_cmd = " && ".join(setup_cmds)
             subprocess.run(["ssh", "-o", "RemoteCommand=none", f"root@{args.ip_address}", full_setup_cmd], capture_output=True)
-            print("✅ Google Drive is now configured and will automatically mount to 'projects/GoogleDrive' on your server!")
+            print("✅ Google Drive is now configured! A 'VPS-Projects' folder has been created in your Google Drive and mounted to 'projects/GoogleDrive' on your server.")
         else:
             print("ℹ️ Skipping Google Drive setup. You can set it up manually later using 'rclone config' on the server.")
     except EOFError:
@@ -183,17 +195,17 @@ def main():
 
     print("\n🎉 Setup Complete! 🎉")
     print("\n🖥️  TERMINAL ACCESS (SSH):")
-    print("   Open your terminal and type:  ssh claude-box")
+    print(f"   Open your terminal and type:  ssh {host_alias}")
     print("   (This will automatically log you in and start/resume your tmux session!)")
-    
+
     print("\n📁 LOCAL FILE ACCESS (Native Network Drive):")
-    print("   1. First, run 'ssh claude-box' in a terminal and keep it open (this opens the secure tunnel).")
+    print(f"   1. First, run 'ssh {host_alias}' in a terminal and keep it open (this opens the secure tunnel).")
     if platform.system() == "Darwin":
         print("   2. In Finder, press Cmd+K and enter: smb://student@127.0.0.1:10445/workspace")
     elif platform.system() == "Windows":
         print("   2. In File Explorer, map a drive to: \\\\127.0.0.1@10445\\workspace")
     print("   3. Enter your Visual Desktop Password when prompted.")
-    
+
     print("\n🖼️  VISUAL DESKTOP ACCESS (RDP):")
     if platform.system() == "Darwin" and not rdp_supported:
         print("   1. First, install 'Microsoft Remote Desktop' from the Mac App Store.")
@@ -206,7 +218,7 @@ def main():
     print("For the best experience editing files on your server, we strongly recommend using Visual Studio Code:")
     print("1. Download and install VS Code (https://code.visualstudio.com/)")
     print("2. Install the 'Remote - SSH' extension")
-    print("3. Click the Remote Explorer icon, and connect to 'claude-box'")
+    print(f"3. Click the Remote Explorer icon, and connect to '{host_alias}'")
     print("VS Code will automatically open your remote files just like a local folder!")
     print("===========================================")
 
@@ -215,12 +227,12 @@ def main():
     print("To use the Claude Desktop app with your new server:")
     print("1. Open the Claude Desktop app on your computer.")
     print("2. Click the 'SSH' or 'Remote' icon (usually in the bottom left or settings).")
-    print("3. When prompted for a 'Host', simply type:  claude-box")
+    print(f"3. When prompted for a 'Host', simply type:  {host_alias}")
     print("4. Claude will automatically use your configured SSH key and connect!")
     print("===========================================")
 
     # Test the SSH connection
-    connection_successful = test_ssh_connection()
+    connection_successful = test_ssh_connection(host_alias)
     if not connection_successful:
         print_troubleshooting()
         return
